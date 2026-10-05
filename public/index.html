@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transkrip YouTube</title>
+<style>
+:root{--bg:#f7f8fa;--card:#fff;--text:#1a1d23;--muted:#667085;--line:#e4e7ec;--accent:#2b59ff;--accent-d:#1f43c7;--err:#c0262d}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#171a21;--text:#eceef2;--muted:#98a2b3;--line:#262b36;--accent:#5b82ff;--accent-d:#7a98ff;--err:#ff7b80}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:48px 20px 64px}
+h1{font-size:1.75rem;margin:0 0 6px;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:0 0 28px}
+form{display:flex;gap:8px;flex-wrap:wrap}
+input{flex:1 1 280px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text);font:inherit}
+input:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button{padding:12px 20px;border:0;border-radius:8px;background:var(--accent);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button:hover{background:var(--accent-d)}
+button:disabled{opacity:.6;cursor:wait}
+button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+button.ghost:hover{background:var(--line)}
+#err{color:var(--err);margin:14px 0 0;min-height:1.5em}
+#result{display:none;margin-top:24px;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+#thumb{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:var(--line)}
+.body{padding:20px}
+#title{font-size:1.15rem;font-weight:600;margin:0 0 4px}
+.meta{color:var(--muted);font-size:.9rem;margin:0 0 16px}
+#preview{max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:14px;font-size:.95rem}
+#preview p{margin:0 0 10px}
+#preview time{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:8px;font-size:.85rem}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Transkrip YouTube</h1>
+  <p class="sub">Tempel link video, lihat transkripnya, lalu unduh sebagai dokumen.</p>
+
+  <form id="f">
+    <input id="url" type="text" placeholder="https://www.youtube.com/watch?v=..." aria-label="Link YouTube" autocomplete="off" required>
+    <button id="go" type="submit">Ambil transkrip</button>
+  </form>
+  <p id="err" role="alert"></p>
+
+  <section id="result">
+    <img id="thumb" alt="Thumbnail video">
+    <div class="body">
+      <h2 id="title"></h2>
+      <p class="meta" id="meta"></p>
+      <div id="preview"></div>
+      <div class="actions">
+        <button id="dlDoc">Unduh dokumen (.doc)</button>
+        <button id="dlTxt" class="ghost">Unduh teks (.txt)</button>
+        <button id="copy" class="ghost">Salin</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let data = null;
+
+const getId = (s) => {
+  s = s.trim();
+  if (/^[\w-]{11}$/.test(s)) return s;
+  try {
+    const u = new URL(s.startsWith("http") ? s : "https://" + s);
+    if (u.hostname.includes("youtu.be")) return u.pathname.slice(1, 12);
+    if (u.searchParams.get("v")) return u.searchParams.get("v");
+    const m = u.pathname.match(/\/(embed|shorts|live)\/([\w-]{11})/);
+    if (m) return m[2];
+  } catch {}
+  return null;
+};
+const fmt = (t) => {
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  const p = (n) => String(n).padStart(2, "0");
+  return (h ? h + ":" : "") + p(m) + ":" + p(s);
+};
+const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const plain = () => data.items.map((i) => `[${fmt(i.t)}] ${i.text}`).join("\n");
+const fileName = () => (data.title || data.id).replace(/[^\w\- ]+/g, "").trim().slice(0, 60) || data.id;
+
+function save(content, type, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["\ufeff" + content], { type }));
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+$("f").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("err").textContent = "";
+  const id = getId($("url").value);
+  if (!id) { $("err").textContent = "Link YouTube tidak valid."; return; }
+  $("go").disabled = true; $("go").textContent = "Memuat...";
+  try {
+    const r = await fetch("/api/transcript?id=" + id);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error);
+    data = j;
+    $("thumb").src = `https://img.youtube.com/vi/${id}/maxresdefault.jpg`;
+    $("thumb").onerror = function () { this.onerror = null; this.src = `https://img.youtube.com/vi/${id}/hqdefault.jpg`; };
+    $("title").textContent = j.title || "Video YouTube";
+    $("meta").textContent = `${j.items.length} baris transkrip`;
+    $("preview").innerHTML = j.items.map((i) => `<p><time>${fmt(i.t)}</time>${esc(i.text)}</p>`).join("");
+    $("result").style.display = "block";
+  } catch (er) {
+    $("result").style.display = "none";
+    $("err").textContent = er.message || "Terjadi kesalahan.";
+  }
+  $("go").disabled = false; $("go").textContent = "Ambil transkrip";
+});
+
+$("dlDoc").onclick = () => {
+  const body = data.items.map((i) => `<p><b>[${fmt(i.t)}]</b> ${esc(i.text)}</p>`).join("");
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${esc(data.title)}</title></head><body style="font-family:Calibri,Arial;font-size:11pt"><h1>${esc(data.title)}</h1><p>https://www.youtube.com/watch?v=${data.id}</p><hr>${body}</body></html>`;
+  save(html, "application/msword", fileName() + ".doc");
+};
+$("dlTxt").onclick = () => save(`${data.title}\nhttps://www.youtube.com/watch?v=${data.id}\n\n${plain()}`, "text/plain", fileName() + ".txt");
+$("copy").onclick = async () => {
+  await navigator.clipboard.writeText(plain());
+  $("copy").textContent = "Tersalin";
+  setTimeout(() => ($("copy").textContent = "Salin"), 1500);
+};
+</script>
+</body>
+</html>
