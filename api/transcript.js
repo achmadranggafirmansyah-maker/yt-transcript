@@ -5,6 +5,11 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Link YouTube tidak valid." });
   }
 
+  const lang = String(req.query.lang || "");
+  if (lang && !/^[a-zA-Z]{2,3}(-[a-zA-Z]{2,4})?$/.test(lang)) {
+    return res.status(400).json({ error: "Kode bahasa tidak valid." });
+  }
+
   const key = process.env.SUPADATA_API_KEY;
   if (!key) {
     return res.status(500).json({
@@ -15,7 +20,8 @@ export default async function handler(req, res) {
   try {
     const r = await fetch(
       "https://api.supadata.ai/v1/youtube/transcript?url=" +
-        encodeURIComponent("https://www.youtube.com/watch?v=" + id),
+        encodeURIComponent("https://www.youtube.com/watch?v=" + id) +
+        (lang ? "&lang=" + lang : ""),
       { headers: { "x-api-key": key } }
     );
     const body = await r.json().catch(() => ({}));
@@ -26,7 +32,9 @@ export default async function handler(req, res) {
         401: "API key Supadata tidak valid.",
         402: "Kuota Supadata habis.",
         429: "Terlalu banyak permintaan, coba lagi sebentar.",
-        404: "Video ini tidak punya transkrip.",
+        404: lang
+          ? "Transkrip bahasa ini tidak tersedia. Coba bahasa lain."
+          : "Video ini tidak punya transkrip.",
       };
       return res
         .status(r.status === 404 ? 404 : 502)
@@ -51,7 +59,13 @@ export default async function handler(req, res) {
     } catch {}
 
     res.setHeader("Cache-Control", "s-maxage=3600");
-    return res.status(200).json({ id, title, items });
+    return res.status(200).json({
+      id,
+      title,
+      items,
+      lang: body.lang || lang || "",
+      availableLangs: Array.isArray(body.availableLangs) ? body.availableLangs : [],
+    });
   } catch (e) {
     return res.status(500).json({ error: "Kesalahan server: " + e.message });
   }
